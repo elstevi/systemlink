@@ -19,5 +19,14 @@ echo "[DONE]"
 
 # Check out stage two script
 printf "Downloading stage 2 script"
-fetch 
+fetch -q -o "/tmp/systemlink-stage2.sh" "https://raw.githubusercontent.com/elstevi/systemlink/master/scripts/systemlink-stage2.sh"
 echo "[DONE]"
+
+echo "Executing stage 2 script, goodbye."
+while true; do
+	/bin/sh "/tmp/systemlink-stage2.sh"
+	if [ "$?" == "0" ]; then
+		break
+	fi
+done
+
