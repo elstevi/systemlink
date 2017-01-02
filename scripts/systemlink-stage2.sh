@@ -44,6 +44,9 @@ cleanup () {
 	${TAP_DESTROY_COMMAND}
 
 	# Destroy the bridge
+	if [ "${OS}" == "Linux" ]; then
+		${SUDO} ifconfig br0 down
+	fi
 	${BRIDGE_DESTROY_COMMAND}
 
 	echo '[DONE]'
@@ -161,11 +164,14 @@ echo "[DONE]"
 
 # Create the tap and bridge
 printf "Creating the tap and bridge..."
-eval "${TAP_CREATE_COMMAND}"
-eval "${TAP_UP_COMMAND}"
-eval "${BRIDGE_CREATE_COMMAND}"
-eval "${BRIDGE_UP_COMMAND}"
-eval "${SUDO} chown ${USER} ${TAP_PATH}"
+${TAP_CREATE_COMMAND}
+${TAP_UP_COMMAND}
+${BRIDGE_CREATE_COMMAND}
+${BRIDGE_UP_COMMAND}
+# Only need on freebsd
+if [ "$OS" == "FreeBSD" ]; then
+	${SUDO} chown ${USER} ${TAP_PATH}
+fi
 echo "[DONE]"
 
 # Join the tap and bridge
