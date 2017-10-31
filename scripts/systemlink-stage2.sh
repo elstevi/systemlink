@@ -1,23 +1,9 @@
 #!/bin/sh
-
-# The first thing we need is a user
-SSH_HOME=`readlink -f ~/.ssh`
-if [ ! -f "${SSH_HOME}/systemlink-user" ]; then
-	printf "Please enter your system link username and hit enter: "
-	read SSH_USER
-	echo "${SSH_USER}" > "${SSH_HOME}/systemlink-user"
-fi
+set -x
 
 BACK_TITLE="Halo 2 System Link Network"
 OS=`uname`
-PRIV_KEY_FILE="${SSH_HOME}/systemlink"
-PUB_KEY_FILE="${SSH_HOME}/systemlink.pub"
-REMOTE_BRIDGE="172.16.17.1"
-SSH_HOST="systemlink.douglas-enterprises.com"
-SSH_PORT="22"
-SSH_USER=`cat ${SSH_HOME}/systemlink-user`
-SSH_STD_ARGS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SSH_HOST}"
-SSH_SPEC_ARGS="-q -o BatchMode=yes -i ${PRIV_KEY_FILE}"
+REMOTE_BRIDGE="10.4.7.12"
 USER=`whoami`
 
 # Mark a binary as required. If called and the binary doesn't exist, the program will fail and exit
@@ -52,41 +38,6 @@ cleanup () {
 	echo '[DONE]'
 }
 
-# Generate systemlink keys, if they don't exist
-keygen () {
-	if [ ! -f ${PRIV_KEY_FILE} ]; then
-	echo	printf "Generating ssh keys..."
-		ssh-keygen -q -f ${PRIV_KEY_FILE} -t ed25519 -N ''
-		echo "[DONE]"
-	fi
-}
-
-# Test whether we can login to the system link server
-test_ssh_auth() {
-        ssh ${SSH_SPEC_ARGS} ${SSH_STD_ARGS} true > /dev/null 2>&1 
-        if [ "${?}" != "0" ]; then                                                                                                                                                                                                
-                return 1
-        else
-                return 0
-        fi
-}
-
-# Attempt to authenticate with the ssh server. If not able to, attempt to pair with the server
-authenticate () {
-	while true; do
-		test_ssh_auth
-		if [ "${?}" == "0" ]; then
-			break
-		else
-			# Use password based authentication to copy our key in.
-			clear
-			echo "Please enter your system link password and hit enter: "
-			REMOTE_CMD="mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${PUB_KEY}' >> ~/.ssh/authorized_keys"
-			ssh -q ${SSH_STD_ARGS} -- "${REMOTE_CMD}"
-		fi
-	done
-}
-
 # If we aren't root, we are going to need to sudo some commands
 if [ "${USER}" != "root" ]; then
 	SUDO="sudo"
@@ -94,6 +45,9 @@ if [ "${USER}" != "root" ]; then
 else
 	SUDO=""
 fi
+
+binary_requirement 'base64 --version'
+RAND_USER=`dd bs=1 count=10 if=/dev/urandom | base64 | tr -d \+ | tr -d \/ | tr -d \=`
 
 # There are operating specific commands, define them here.
 case "$OS" in
@@ -115,6 +69,7 @@ case "$OS" in
 		BRIDGE_DESTROY_COMMAND="${SUDO} ifconfig ${BRIDGE} destroy"
 		BRIDGE_UP_COMMAND="${SUDO} ifconfig ${BRIDGE} up"
 		BRIDGE_JOIN_COMMAND="${SUDO} ifconfig ${BRIDGE} addm ${TAP}"
+		FETCH_CONNECT="fetch -q -o - https://systemlink.douglas-enterprises.com/join/${RAND_USER}"
 
 		;;
 	Linux)
@@ -131,6 +86,7 @@ case "$OS" in
 		BRIDGE_UP_COMMAND="${SUDO} ifconfig ${BRIDGE} up"
 
 		BRIDGE_JOIN_COMMAND="${SUDO} brctl addif ${BRIDGE} ${TAP}"
+		FETCH_CONNECT="wget --quiet -O - https://systemlink.douglas-enterprises.com/join/${RAND_USER}"
 		binary_requirement ip
 		binary_requirement brctl
 	esac
@@ -145,21 +101,9 @@ cleanup
 # Generate ssh keys if needed
 keygen
 
-# Test SSH connection to system link server
-printf "Testing connection to system link server..."
-
-## Store the public key in this variable for authenticate()
-PUB_KEY=`cat ${PUB_KEY_FILE}`
-
-## Attempt to authenticate
-authenticate
-echo "[DONE]"
-
 # Ask the server to allocate a tap for us to connect to
 printf "Asking the server to allocate a tap for us..."
-REMOTE_TAP=`ssh ${SSH_STD_ARGS} ${SSH_SPEC_ARGS} -- sudo new_tap` 
-REMOTE_TAP=`echo ${REMOTE_TAP} | cut -d p -f2`
-printf "tap${REMOTE_TAP}..."
+${ALLOCATE_TAP}
 echo "[DONE]"
 
 # Create the tap and bridge
@@ -180,7 +124,10 @@ ${BRIDGE_JOIN_COMMAND}
 echo "[DONE]"
 
 # Establish persistent ssh connection with system link server
-autossh -M 1200 -o Tunnel=ethernet -w ${TAP_NUM}:$REMOTE_TAP ${SSH_SPEC_ARGS} ${SSH_STD_ARGS} -N &
+printf "Connecting to systemlink network..."
+CONNECT_CMD=`${FETCH_CONNECT}`
+$CONNECT_CMD
+echo "[DONE]"
 
 # Wait for the tunnel to be established
 sleep 10
